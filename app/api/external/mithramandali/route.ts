@@ -77,6 +77,19 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { memberName, memberId, passType, instagramHandle } = body;
 
+    // Optional Bearer Token Authentication (MITHRAMANDALI_API_SECRET)
+    const expectedSecret = process.env.MITHRAMANDALI_API_SECRET;
+    if (expectedSecret) {
+      const authHeader = req.headers.get("authorization");
+      const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+      if (!bearerToken || bearerToken !== expectedSecret) {
+        return NextResponse.json(
+          { success: false, error: "Unauthorized: Invalid or missing Bearer token" },
+          { status: 401, headers: corsHeaders }
+        );
+      }
+    }
+
     if (!memberId) {
       return NextResponse.json(
         { success: false, error: "memberId is required" },

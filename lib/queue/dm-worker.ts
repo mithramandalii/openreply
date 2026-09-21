@@ -1230,6 +1230,46 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     });
     const commenterName = priorLog?.commenterName ?? null;
 
+    // Repeat CLAIM Protection: If sender already claimed their pass, notify that it is active
+    const priorCompleted = await prisma.dmLog.findFirst({
+      where: {
+        automationId: automation.id,
+        commenterId: senderId,
+        status: "SENT",
+      },
+    });
+
+    if (priorCompleted && matchResult.matchedKeyword?.toUpperCase() === "CLAIM") {
+      try {
+        await sendDirectMessage({
+          context: accessToken,
+          instagramAccountId: automation.instagramAccount.instagramId,
+          userId: senderId,
+          message: `Namaste bro! 🙏 Mee Mithramandali Member Pass already verified and active! 🎟️ You're officially in the inner circle. Visit the vault: https://mithramandali.com`,
+        });
+        await prisma.dmLog.upsert({
+          where: {
+            automationId_commentId: {
+              automationId: automation.id,
+              commentId: dedupeId,
+            },
+          },
+          create: {
+            ...logBase,
+            status: "SENT",
+            errorMessage: "Repeat CLAIM: Delivered already-active confirmation",
+          },
+          update: {
+            status: "SENT",
+            errorMessage: "Repeat CLAIM: Delivered already-active confirmation",
+          },
+        });
+      } catch (err) {
+        console.warn("[DM Worker] Repeat claim message notification error:", err);
+      }
+      continue;
+    }
+
     // Follow gate: anyone not confirmed as a follower gets the prompt instead of
     // the link, with the same `followcheck:` button that re-verifies on tap.
     // `null` (unverifiable) prompts too — this is first contact, exactly like a
