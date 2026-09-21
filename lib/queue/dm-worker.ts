@@ -1369,6 +1369,12 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
 }
 
 async function dispatchJob(job: Job<DmQueueJob>): Promise<void> {
+  // Anti-Spam Humanizer: Add random human timing jitter (3s - 10s) so Meta never detects bot bursts
+  const minJitter = 3000;
+  const maxJitter = 10000;
+  const jitterMs = Math.floor(Math.random() * (maxJitter - minJitter + 1)) + minJitter;
+  await new Promise((resolve) => setTimeout(resolve, jitterMs));
+
   if (job.name === POSTBACK_JOB_NAME) {
     return processPostback(job as Job<ProcessPostbackJob>);
   }

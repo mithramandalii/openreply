@@ -35,6 +35,25 @@ export function replaceUrlWithTrackedPlaceholder(
 }
 
 /**
+ * Resolves spin-syntax like `{Hey|Hello|Namaste}` into a randomly selected option.
+ * Automatically preserves reserved tokens like {username} and {link}.
+ */
+export function resolveSpinSyntax(text: string): string {
+  if (!text) return text;
+  return text.replace(/\{([^{}]+)\}/g, (match, choices) => {
+    const trimmedLower = choices.trim().toLowerCase();
+    if (trimmedLower === "username" || trimmedLower === "link") {
+      return match;
+    }
+    if (choices.includes("|")) {
+      const options = choices.split("|");
+      return options[Math.floor(Math.random() * options.length)].trim();
+    }
+    return match;
+  });
+}
+
+/**
  * Personalize {username} and strip the {link} token — used when the link is
  * delivered as a separate button rather than inline in the message text.
  */
@@ -45,7 +64,8 @@ export function renderMessageWithoutLink({
   message: string;
   commenterName?: string | null;
 }) {
-  return message
+  const varied = resolveSpinSyntax(message);
+  return varied
     .replace(/\{username\}/gi, commenterName ?? "there")
     .replace(/\s*\{link\}\s*/gi, " ")
     .trim();
@@ -72,7 +92,8 @@ export function renderMessageWithTracking({
   trackedLinks?: MessageTrackedLink[];
   baseUrl?: string;
 }) {
-  let rendered = message.replace(/\{username\}/gi, commenterName ?? "there");
+  const varied = resolveSpinSyntax(message);
+  let rendered = varied.replace(/\{username\}/gi, commenterName ?? "there");
   const primaryLink = trackedLinks?.[0];
 
   if (!primaryLink) return rendered;
