@@ -4,6 +4,23 @@ import { prisma } from "@/lib/db/client";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+/**
+ * OPTIONS /api/external/mithramandali
+ * Preflight handler for browser CORS requests
+ */
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders,
+  });
+}
+
 /**
  * GET /api/external/mithramandali
  * Returns active connected Instagram account and integration status
@@ -26,22 +43,28 @@ export async function GET() {
           success: false,
           error: "No active Instagram account connected in OpenReply",
         },
-        { status: 404 }
+        { status: 404, headers: corsHeaders }
       );
     }
 
-    return NextResponse.json({
-      success: true,
-      connectedAccount: account.username,
-      accountName: account.name,
-      status: "ACTIVE",
-      endpoints: {
-        registrationSync: "POST /api/external/mithramandali",
+    return NextResponse.json(
+      {
+        success: true,
+        connectedAccount: account.username,
+        accountName: account.name,
+        status: "ACTIVE",
+        endpoints: {
+          registrationSync: "POST /api/external/mithramandali",
+        },
       },
-    });
+      { headers: corsHeaders }
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal error";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: 500, headers: corsHeaders }
+    );
   }
 }
 
@@ -57,7 +80,7 @@ export async function POST(req: NextRequest) {
     if (!memberId) {
       return NextResponse.json(
         { success: false, error: "memberId is required" },
-        { status: 400 }
+        { status: 400, headers: corsHeaders }
       );
     }
 
@@ -103,16 +126,22 @@ export async function POST(req: NextRequest) {
         .catch(() => {});
     }
 
-    return NextResponse.json({
-      success: true,
-      memberId,
-      connectedBotHandle: botHandle,
-      dmDeepLink,
-      welcomeMessage,
-      action: "Direct user to dmDeepLink to trigger automatic Instagram DM delivery",
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        memberId,
+        connectedBotHandle: botHandle,
+        dmDeepLink,
+        welcomeMessage,
+        action: "Direct user to dmDeepLink to trigger automatic Instagram DM delivery",
+      },
+      { headers: corsHeaders }
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal error";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: 500, headers: corsHeaders }
+    );
   }
 }
