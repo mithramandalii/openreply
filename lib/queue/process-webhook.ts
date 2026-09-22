@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db/client';
 import { getDMQueue, MESSAGE_JOB_NAME, POSTBACK_JOB_NAME } from '@/lib/queue/client';
 import { parseCommentEvents, parseMessageEvents, parsePostbackEvents, parseReadEvents } from '@/lib/meta/webhook';
 import { Prisma, type InstagramProvider } from '@/app/generated/prisma/client';
+import { processInboundDirectMessage, processPostbackDirect } from '@/lib/queue/dm-worker';
 
 const OPENING_DM_READ_FALLBACK_DELAY_MS = 5 * 60 * 1000;
 type InstagramPayload = Parameters<typeof parseCommentEvents>[0];
@@ -72,23 +73,38 @@ export async function processInstagramWebhook({ payload: incoming, provider, wor
     );
 
     for (const event of postbackEvents) {
-      await queue.add(
-        POSTBACK_JOB_NAME,
-        {
+      const connId = accountMap.get(event.instagramAccountId)?.id;
+      // Direct inline execution for real-time responsiveness on serverless
+      try {
+        await processPostbackDirect({
           instagramAccountId: event.instagramAccountId,
-          accountConnectionId: accountMap.get(event.instagramAccountId)?.id,
+          accountConnectionId: connId,
           userId: event.userId,
           payload: event.payload,
           mid: event.mid,
-        },
-        {
-          // BullMQ forbids ":" in custom job ids, and the payload is
-          // "reveal:<id>", so build with underscores and strip any colons.
-          jobId: `postback_${event.instagramAccountId}_${event.userId}_${(
-            event.mid ?? event.payload
-          ).replace(/:/g, "_")}`,
+        });
+      } catch (err) {
+        console.warn('[Webhook] Direct postback processing fallback to queue:', err);
+        try {
+          await queue.add(
+            POSTBACK_JOB_NAME,
+            {
+              instagramAccountId: event.instagramAccountId,
+              accountConnectionId: connId,
+              userId: event.userId,
+              payload: event.payload,
+              mid: event.mid,
+            },
+            {
+              jobId: `postback_${event.instagramAccountId}_${event.userId}_${(
+                event.mid ?? event.payload
+              ).replace(/:/g, "_")}`,
+            }
+          );
+        } catch(qErr) {
+          console.error('[Webhook] Queue fallback error:', qErr);
         }
-      );
+      }
     }
 
     // Inbound DMs → keyword-triggered autoreply.
@@ -100,25 +116,37 @@ export async function processInstagramWebhook({ payload: incoming, provider, wor
       const account = accountMap.get(event.instagramAccountId);
       if (!account) continue;
 
-      await queue.add(
-        MESSAGE_JOB_NAME,
-        {
+      // Direct inline execution for real-time responsiveness on serverless
+      try {
+        await processInboundDirectMessage({
           instagramAccountId: event.instagramAccountId,
-          accountConnectionId: accountMap.get(event.instagramAccountId)?.id,
+          accountConnectionId: account.id,
           messageId: event.messageId,
           messageText: event.messageText,
           senderId: event.senderId,
-        },
-        {
-          // Message ids can contain characters BullMQ rejects in a job id (":"
-          // in particular). base64url encodes into exactly the allowed alphabet
-          // and stays injective — substituting invalid characters would let two
-          // distinct mids collapse onto one job id, silently dropping a reply.
-          jobId: `message_${event.instagramAccountId}_${Buffer.from(
-            event.messageId
-          ).toString("base64url")}`,
+        });
+      } catch (err) {
+        console.warn('[Webhook] Direct message processing fallback to queue:', err);
+        try {
+          await queue.add(
+            MESSAGE_JOB_NAME,
+            {
+              instagramAccountId: event.instagramAccountId,
+              accountConnectionId: account.id,
+              messageId: event.messageId,
+              messageText: event.messageText,
+              senderId: event.senderId,
+            },
+            {
+              jobId: `message_${event.instagramAccountId}_${Buffer.from(
+                event.messageId
+              ).toString("base64url")}`,
+            }
+          );
+        } catch(qErr) {
+          console.error('[Webhook] Queue fallback error:', qErr);
         }
-      );
+      }
 
       if (account) {
         await prisma.webhookEvent.update({

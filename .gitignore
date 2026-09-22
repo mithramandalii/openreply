@@ -43,3 +43,8 @@ next-env.d.ts
 
 /app/generated/prisma
 .gstack/
+*service-account*.json
+test_firestore.ts
+check_status.cjs
+scratch_*.ts
+update_keywords.ts

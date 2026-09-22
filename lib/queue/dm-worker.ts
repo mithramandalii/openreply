@@ -128,10 +128,12 @@ function buildInlineLinkFallback(
 }
 
 type RevealAutomation = {
+  name?: string;
+  keywords?: string[];
   dmMessage: string;
   linkButtonLabel: string | null;
   trackedLinks: WorkerTrackedLink[];
-  instagramAccount: { instagramId: string };
+  instagramAccount: { instagramId: string; username?: string };
 };
 
 /**
@@ -152,13 +154,48 @@ async function sendRevealDirectMessage({
   commenterName: string | null;
   context: string;
 }): Promise<void> {
+  let deliverMessage = automation.dmMessage;
+
+  // Custom Mithramandali Pass Auto-Minting & Live Firestore Unlock
+  if (automation.name?.includes("Mithramandali") || automation.keywords?.includes("CLAIM")) {
+    try {
+      const { unlockMemberPass } = await import("@/lib/mithramandali/firestore");
+      let igUsername: string | null = null;
+      if (accessToken.provider === "META") {
+        try {
+          const url = new URL(`https://graph.instagram.com/v22.0/${userId}`);
+          url.searchParams.set("fields", "name,username");
+          url.searchParams.set("access_token", accessToken.accessToken);
+          const res = await fetch(url.toString());
+          if (res.ok) {
+            const profile = await res.json();
+            if (profile.username) igUsername = profile.username;
+            if (!commenterName && profile.name) commenterName = profile.name;
+          }
+        } catch (e) {
+          console.warn("[DM Worker] Profile fetch warning:", e);
+        }
+      }
+
+      const unlocked = await unlockMemberPass({
+        username: igUsername,
+        igsid: userId,
+        fallbackName: commenterName || "Mithrudu",
+      });
+
+      deliverMessage = `Namaste ${unlocked.name} bro! 🙏\n\nMee Mithramandali Member Pass officially verified & active! 🎟️\n\n✦ Mee Pass ID: ${unlocked.passId}\n\nWebsite lo mee Woven Banner live reveal aipoindi. Visit your conclave pass:\nhttps://mithramandali-2e7ed.web.app`;
+    } catch (err) {
+      console.error("[DM Worker] Mithramandali pass unlock failed:", err);
+    }
+  }
+
   if (automation.trackedLinks.length === 0) {
     await sendDirectMessage({
       context: accessToken,
       instagramAccountId: automation.instagramAccount.instagramId,
       userId: userId,
       message: renderMessageWithTracking({
-        message: automation.dmMessage,
+        message: deliverMessage,
         commenterName,
         trackedLinks: automation.trackedLinks,
       }),
@@ -169,7 +206,7 @@ async function sendRevealDirectMessage({
   // Try button template first; if Meta rejects it, fall back to inline links.
   const bodyText =
     renderMessageWithoutLink({
-      message: automation.dmMessage,
+      message: deliverMessage,
       commenterName,
     }) || "Here's your link:";
   const buttons = buildLinkButtons(
@@ -1525,3 +1562,24 @@ export function createDMWorker(): Worker<DmQueueJob> {
 
   return worker;
 }
+
+export async function processInboundDirectMessage(data: {
+  instagramAccountId: string;
+  accountConnectionId?: string;
+  messageId: string;
+  messageText: string;
+  senderId: string;
+}): Promise<void> {
+  return processMessage({ id: data.messageId, data } as any);
+}
+
+export async function processPostbackDirect(data: {
+  instagramAccountId: string;
+  accountConnectionId?: string;
+  userId: string;
+  payload: string;
+  mid?: string;
+}): Promise<void> {
+  return processPostback({ id: data.mid || data.payload, data } as any);
+}
+
