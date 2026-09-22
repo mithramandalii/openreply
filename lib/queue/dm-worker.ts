@@ -155,9 +155,10 @@ async function sendRevealDirectMessage({
   context: string;
 }): Promise<void> {
   let deliverMessage = automation.dmMessage;
+  let unlockedPassId: string | null = null;
 
   // Custom Mithramandali Pass Auto-Minting & Live Firestore Unlock
-  if (automation.name?.includes("Mithramandali") || automation.keywords?.includes("CLAIM")) {
+  if (automation.name?.includes("Mithramandali") || automation.keywords?.includes("CLAIM") || automation.dmMessage?.includes("Mithra") || automation.dmMessage?.includes("Pass")) {
     try {
       const { unlockMemberPass } = await import("@/lib/mithramandali/firestore");
       let igUsername: string | null = null;
@@ -182,6 +183,7 @@ async function sendRevealDirectMessage({
         igsid: userId,
         fallbackName: commenterName || "Mithrudu",
       });
+      unlockedPassId = unlocked.passId;
 
       if (automation.dmMessage?.includes("{id}") || automation.dmMessage?.includes("{passId}")) {
         deliverMessage = automation.dmMessage
@@ -218,7 +220,11 @@ async function sendRevealDirectMessage({
   const buttons = buildLinkButtons(
     automation.trackedLinks,
     automation.linkButtonLabel
-  );
+  ).map((b) => {
+    if (!unlockedPassId) return b;
+    const separator = b.url.includes("?") ? "&" : "?";
+    return { ...b, url: `${b.url}${separator}passId=${encodeURIComponent(unlockedPassId)}` };
+  });
 
   try {
     await sendDirectMessageWithLinkButton({
@@ -238,16 +244,21 @@ async function sendRevealDirectMessage({
       formatError(buttonError)
     );
     try {
+      const fallbackMsg = buildInlineLinkFallback(
+        deliverMessage,
+        commenterName,
+        automation.trackedLinks,
+        bodyText
+      );
+      const finalFallback = unlockedPassId
+        ? fallbackMsg.replace(/(\/r\/[A-Za-z0-9_-]+)/g, `$1?passId=${encodeURIComponent(unlockedPassId)}`)
+        : fallbackMsg;
+
       await sendDirectMessage({
         context: accessToken,
         instagramAccountId: automation.instagramAccount.instagramId,
         userId: userId,
-        message: buildInlineLinkFallback(
-          automation.dmMessage,
-          commenterName,
-          automation.trackedLinks,
-          bodyText
-        ),
+        message: finalFallback,
       });
     } catch {
       throw buttonError;
@@ -930,9 +941,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     if (follows === false) {
       if (fallback) return;
       const promptText = renderMessageWithoutLink({
-        message:
-          automation.followPromptMessage ||
-          "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over",
+        message: "Dude you can't trick me😌 \nIf you want your ID do follow💫",
         commenterName,
       });
       try {
@@ -944,8 +953,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
               instagramAccountId: automation.instagramAccount.instagramId,
               userId: userId,
               text: promptText,
-              buttonTitle:
-                automation.followPromptButtonLabel || "i'm following",
+              buttonTitle: "Yeaa i did ✦👊🏻",
               payload: `followcheck:${automation.id}`,
             }),
         });
