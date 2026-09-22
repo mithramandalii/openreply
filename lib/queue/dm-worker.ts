@@ -183,7 +183,13 @@ async function sendRevealDirectMessage({
         fallbackName: commenterName || "Mithrudu",
       });
 
-      deliverMessage = `Namaste ${unlocked.name} bro! 🙏\n\nMee Mithramandali Member Pass officially verified & active! 🎟️\n\n✦ Mee Pass ID: ${unlocked.passId}\n\nWebsite lo mee Woven Banner live reveal aipoindi. Visit your conclave pass:\nhttps://mithramandali-2e7ed.web.app`;
+      if (automation.dmMessage?.includes("{id}") || automation.dmMessage?.includes("{passId}")) {
+        deliverMessage = automation.dmMessage
+          .replace(/{id}/gi, unlocked.passId)
+          .replace(/{passId}/gi, unlocked.passId);
+      } else {
+        deliverMessage = automation.dmMessage;
+      }
     } catch (err) {
       console.error("[DM Worker] Mithramandali pass unlock failed:", err);
     }
