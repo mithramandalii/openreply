@@ -52,3 +52,6 @@ set_icebreakers.ts
 add_kw.ts
 test_refresh.ts
 add_mandali_kw.ts
+check_ws.ts
+recreate_auto.ts
+test_conv.ts
