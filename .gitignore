@@ -50,3 +50,5 @@ scratch_*.ts
 update_keywords.ts
 set_icebreakers.ts
 add_kw.ts
+test_refresh.ts
+add_mandali_kw.ts
