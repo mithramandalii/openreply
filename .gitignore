@@ -48,3 +48,5 @@ test_firestore.ts
 check_status.cjs
 scratch_*.ts
 update_keywords.ts
+set_icebreakers.ts
+add_kw.ts
