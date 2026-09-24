@@ -156,11 +156,12 @@ async function sendRevealDirectMessage({
 }): Promise<void> {
   let deliverMessage = automation.dmMessage;
   let unlockedPassId: string | null = null;
+  let claimResult: any = null;
 
-  // Custom Mithramandali Pass Auto-Minting & Live Firestore Unlock
+  // Custom Mithramandali Pass Claim Code Issuance & Existing Member Recovery
   if (automation.name?.includes("Mithramandali") || automation.keywords?.includes("CLAIM") || automation.dmMessage?.includes("Mithra") || automation.dmMessage?.includes("Pass")) {
     try {
-      const { unlockMemberPass } = await import("@/lib/mithramandali/firestore");
+      const { issueClaimCode } = await import("@/lib/mithramandali/claim-codes");
       let igUsername: string | null = null;
       if (accessToken.provider === "META") {
         try {
@@ -178,22 +179,21 @@ async function sendRevealDirectMessage({
         }
       }
 
-      const unlocked = await unlockMemberPass({
-        username: igUsername,
+      claimResult = await issueClaimCode({
         igsid: userId,
-        fallbackName: commenterName || "Mithrudu",
+        username: igUsername,
+        name: commenterName || "Mithrudu",
       });
-      unlockedPassId = unlocked.passId;
 
-      if (automation.dmMessage?.includes("{id}") || automation.dmMessage?.includes("{passId}")) {
-        deliverMessage = automation.dmMessage
-          .replace(/{id}/gi, unlocked.passId)
-          .replace(/{passId}/gi, unlocked.passId);
-      } else {
-        deliverMessage = automation.dmMessage;
+      if (claimResult.alreadyActive) {
+        // Smart Recovery for existing members
+        deliverMessage = `Namaste ${commenterName || "bro"}! 🙏 Meeru already Mithramandali Member.\n\n🎟️ Mee Pass ID: ${claimResult.passId}\n\nDirect link to view your pass:\n👉 https://mithramandali.web.app/?inspect=true`;
+      } else if (claimResult.formattedCode) {
+        // Fresh Crockford Base32 Claim Code (2-Message Delivery for 1-tap mobile copy)
+        deliverMessage = `Namaste ${commenterName || "bro"}! 🙏 Mithramandali Conclave 2026 Founding Pass kosam mee secret Verification Code kinda message lo undi 👇 (single-use • 24 hours)\nWebsite lo paste chesi mee pass weave cheskondi: https://mithramandali.web.app`;
       }
     } catch (err) {
-      console.error("[DM Worker] Mithramandali pass unlock failed:", err);
+      console.error("[DM Worker] Mithramandali claim code issuance failed:", err);
     }
   }
 
@@ -208,60 +208,73 @@ async function sendRevealDirectMessage({
         trackedLinks: automation.trackedLinks,
       }),
     });
-    return;
+  } else {
+    // Try button template first; if Meta rejects it, fall back to inline links.
+    const bodyText =
+      renderMessageWithoutLink({
+        message: deliverMessage,
+        commenterName,
+      }) || "Here's your link:";
+    const buttons = buildLinkButtons(
+      automation.trackedLinks,
+      automation.linkButtonLabel
+    ).map((b) => {
+      if (!unlockedPassId) return b;
+      const separator = b.url.includes("?") ? "&" : "?";
+      return { ...b, url: `${b.url}${separator}passId=${encodeURIComponent(unlockedPassId)}` };
+    });
+
+    try {
+      await sendDirectMessageWithLinkButton({
+        context: accessToken,
+        instagramAccountId: automation.instagramAccount.instagramId,
+        userId: userId,
+        text: bodyText,
+        buttons: buttons,
+      });
+    } catch (buttonError) {
+      // A closed messaging window rejects the text retry too, so don't let it
+      // overwrite the original error with a misleading one.
+      if (!isTemplateRejection(buttonError)) throw buttonError;
+
+      console.log(
+        `[DM Worker] Button template rejected in ${context}, falling back to inline link:`,
+        formatError(buttonError)
+      );
+      try {
+        const fallbackMsg = buildInlineLinkFallback(
+          deliverMessage,
+          commenterName,
+          automation.trackedLinks,
+          bodyText
+        );
+        const finalFallback = unlockedPassId
+          ? fallbackMsg.replace(/(\/r\/[A-Za-z0-9_-]+)/g, `$1?passId=${encodeURIComponent(unlockedPassId)}`)
+          : fallbackMsg;
+
+        await sendDirectMessage({
+          context: accessToken,
+          instagramAccountId: automation.instagramAccount.instagramId,
+          userId: userId,
+          message: finalFallback,
+        });
+      } catch {
+        throw buttonError;
+      }
+    }
   }
 
-  // Try button template first; if Meta rejects it, fall back to inline links.
-  const bodyText =
-    renderMessageWithoutLink({
-      message: deliverMessage,
-      commenterName,
-    }) || "Here's your link:";
-  const buttons = buildLinkButtons(
-    automation.trackedLinks,
-    automation.linkButtonLabel
-  ).map((b) => {
-    if (!unlockedPassId) return b;
-    const separator = b.url.includes("?") ? "&" : "?";
-    return { ...b, url: `${b.url}${separator}passId=${encodeURIComponent(unlockedPassId)}` };
-  });
-
-  try {
-    await sendDirectMessageWithLinkButton({
-      context: accessToken,
-      instagramAccountId: automation.instagramAccount.instagramId,
-      userId: userId,
-      text: bodyText,
-      buttons: buttons,
-    });
-  } catch (buttonError) {
-    // A closed messaging window rejects the text retry too, so don't let it
-    // overwrite the original error with a misleading one.
-    if (!isTemplateRejection(buttonError)) throw buttonError;
-
-    console.log(
-      `[DM Worker] Button template rejected in ${context}, falling back to inline link:`,
-      formatError(buttonError)
-    );
+  // Message 2: Standalone Code for 1-tap mobile copying (always sent after Message 1)
+  if (claimResult?.formattedCode && !claimResult.alreadyActive) {
     try {
-      const fallbackMsg = buildInlineLinkFallback(
-        deliverMessage,
-        commenterName,
-        automation.trackedLinks,
-        bodyText
-      );
-      const finalFallback = unlockedPassId
-        ? fallbackMsg.replace(/(\/r\/[A-Za-z0-9_-]+)/g, `$1?passId=${encodeURIComponent(unlockedPassId)}`)
-        : fallbackMsg;
-
       await sendDirectMessage({
         context: accessToken,
         instagramAccountId: automation.instagramAccount.instagramId,
         userId: userId,
-        message: finalFallback,
+        message: claimResult.formattedCode,
       });
-    } catch {
-      throw buttonError;
+    } catch (err2) {
+      console.warn("[DM Worker] Code follow-up message failed:", err2);
     }
   }
 }

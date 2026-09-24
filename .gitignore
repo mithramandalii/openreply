@@ -58,3 +58,6 @@ test_conv.ts
 get_campaign.ts
 update_user_campaign.ts
 update_btn.ts
+test_*.cjs
+generate_*.cjs
+scratch_*.js
