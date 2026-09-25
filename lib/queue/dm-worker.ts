@@ -187,10 +187,10 @@ async function sendRevealDirectMessage({
 
       if (claimResult.alreadyActive) {
         // Smart Recovery for existing members
-        deliverMessage = `Namaste ${commenterName || "bro"}! 🙏 Meeru already Mithramandali Member.\n\n🎟️ Mee Pass ID: ${claimResult.passId}\n\nDirect link to view your pass:\n👉 https://mithramandali-2e7ed.web.app/?inspect=true`;
+        deliverMessage = `Welcome to Fam ! 🔥\nYour  Pass🎟️ is officially verified & active!\nGo checkout your id!\n\n🎟️ Mee Pass ID: ${claimResult.passId}`;
       } else if (claimResult.formattedCode) {
-        // Fresh Crockford Base32 Claim Code delivery matching brand template
-        deliverMessage = `Welcome to Fam ! 🔥\nYour Pass 🎟️ officially verified & active!\n\nMee Secret Claim Code kinda message lo undi 👇\nSingle tap chesi COPY cheskondi:\n\nVisit website to weave ur pass:\n👉 https://mithramandali-2e7ed.web.app?code=${claimResult.formattedCode}`;
+        // Exact match to user screenshot:
+        deliverMessage = `Welcome to Fam ! 🔥\nYour  Pass🎟️ is officially verified & active!\nGo checkout your id!`;
       }
     } catch (err) {
       console.error("[DM Worker] Mithramandali claim code issuance failed:", err);
