@@ -416,3 +416,8 @@ model PostbackDelivery {
   id String @id
   createdAt DateTime @default(now())
 }
+
+model TriggerCooldown {
+  igsid           String   @id
+  lastTriggeredAt DateTime @default(now())
+}

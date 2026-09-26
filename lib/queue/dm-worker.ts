@@ -50,6 +50,7 @@ import {
   ZernioApiError,
   ZernioDeliveryUnconfirmedError,
 } from "@/lib/zernio/client";
+import { tryConsumeTriggerCooldown } from "@/lib/mithramandali/cooldown";
 
 const BACKOFF_DELAYS = [5 * 60 * 1000, 15 * 60 * 1000, 45 * 60 * 1000];
 
@@ -1478,12 +1479,6 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
 }
 
 async function dispatchJob(job: Job<DmQueueJob>): Promise<void> {
-  // Anti-Spam Humanizer: Add random human timing jitter (3s - 10s) so Meta never detects bot bursts
-  const minJitter = 3000;
-  const maxJitter = 10000;
-  const jitterMs = Math.floor(Math.random() * (maxJitter - minJitter + 1)) + minJitter;
-  await new Promise((resolve) => setTimeout(resolve, jitterMs));
-
   if (job.name === POSTBACK_JOB_NAME) {
     return processPostback(job as Job<ProcessPostbackJob>);
   }
@@ -1602,6 +1597,11 @@ export async function processInboundDirectMessage(data: {
   messageText: string;
   senderId: string;
 }): Promise<void> {
+  const allowed = await tryConsumeTriggerCooldown(data.senderId);
+  if (!allowed) {
+    console.log(`[DM Worker] Skipping inbound DM for ${data.senderId} due to 60s cooldown`);
+    return;
+  }
   return processMessage({ id: data.messageId, data } as any);
 }
 
@@ -1612,6 +1612,11 @@ export async function processPostbackDirect(data: {
   payload: string;
   mid?: string;
 }): Promise<void> {
+  const allowed = await tryConsumeTriggerCooldown(data.userId);
+  if (!allowed) {
+    console.log(`[DM Worker] Skipping postback for ${data.userId} due to 60s cooldown`);
+    return;
+  }
   return processPostback({ id: data.mid || data.payload, data } as any);
 }
 
