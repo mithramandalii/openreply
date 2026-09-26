@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { waitUntil } from "@vercel/functions";
 import { UnrecoverableError, Worker, type Job } from "bullmq";
 import {
   getDMQueue,
@@ -128,12 +129,15 @@ function buildInlineLinkFallback(
 }
 
 type RevealAutomation = {
+  id?: string;
   name?: string;
   keywords?: string[];
   dmMessage: string;
   linkButtonLabel: string | null;
   trackedLinks: WorkerTrackedLink[];
   instagramAccount: { instagramId: string; username?: string };
+  followUpEnabled?: boolean;
+  followUpMessage?: string | null;
 };
 
 /**
@@ -154,12 +158,15 @@ async function sendRevealDirectMessage({
   commenterName: string | null;
   context: string;
 }): Promise<void> {
-  let deliverMessage = automation.dmMessage;
-  let unlockedPassId: string | null = null;
-  let claimResult: any = null;
-
   // Custom Mithramandali Pass Claim Code Issuance & Existing Member Recovery
-  if (automation.name?.includes("Mithramandali") || automation.keywords?.includes("CLAIM") || automation.dmMessage?.includes("Mithra") || automation.dmMessage?.includes("Pass")) {
+  const isMithramandali =
+    automation.name?.includes("Mithramandali") ||
+    automation.keywords?.some((k: string) => /claim|pass|verify/i.test(k)) ||
+    automation.dmMessage?.includes("Mithra") ||
+    automation.dmMessage?.includes("Pass") ||
+    automation.dmMessage?.includes("Fam");
+
+  if (isMithramandali) {
     try {
       const { issueClaimCode } = await import("@/lib/mithramandali/claim-codes");
       let igUsername: string | null = null;
@@ -179,23 +186,76 @@ async function sendRevealDirectMessage({
         }
       }
 
-      claimResult = await issueClaimCode({
+      const claimResult = await issueClaimCode({
         igsid: userId,
         username: igUsername,
         name: commenterName || "Mithrudu",
       });
 
-      // Canonical Photo 3 Design: Namaste message with link button
-      deliverMessage = `Namaste 🎠! 🙏 Mithramandali Founding Pass kosam mee secret Verification Code kinda message lo undi 👇 (single-use • 24 hours)\nWebsite lo paste chesi mee pass weave cheskondi: https://mithramandali-2e7ed.web.app`;
-
+      // 1. Existing Active Member: Send recovery message (NO verification code, NO links)
       if (claimResult.alreadyActive && claimResult.passId) {
-        deliverMessage += `\n\n🎟️ Mee Active Pass ID: ${claimResult.passId}`;
+        const recoveryMessage = `Welcome back! Mee Mithramandali Pass already verified & active ga undi! 🎟️\n\n🎟️ Mee Pass ID: ${claimResult.passId}`;
+        await sendDirectMessage({
+          context: accessToken,
+          instagramAccountId: automation.instagramAccount.instagramId,
+          userId: userId,
+          message: recoveryMessage,
+        });
+        return;
       }
+
+      // 2. New Member / Unclaimed Code: 3-Message Flow
+      // Message 1: Plain text welcome (no links, no buttons)
+      const msg1 =
+        automation.dmMessage ||
+        "Welcome to Fam !❤️‍🔥\nYour pass 🎟️ is officially verified & active !\nHere's your ID 🔑";
+      await sendDirectMessage({
+        context: accessToken,
+        instagramAccountId: automation.instagramAccount.instagramId,
+        userId: userId,
+        message: msg1,
+      });
+
+      // Message 2: Standalone 1-Tap Copyable Code
+      if (claimResult.formattedCode) {
+        await new Promise((r) => setTimeout(r, 600));
+        await sendDirectMessage({
+          context: accessToken,
+          instagramAccountId: automation.instagramAccount.instagramId,
+          userId: userId,
+          message: claimResult.formattedCode,
+        });
+      }
+
+      // Message 3: 30-Second Delayed Appreciation Follow-up via Vercel waitUntil
+      const msg3 =
+        automation.followUpMessage?.trim() ||
+        "Btw... I'm very glad you're here🫂\nMore then a follower, we're family now.💗\nLowkey be part of what comes next...👀\nWelcome to MithraMandali✨";
+
+      waitUntil(
+        (async () => {
+          try {
+            await new Promise((r) => setTimeout(r, 30_000));
+            await sendDirectMessage({
+              context: accessToken,
+              instagramAccountId: automation.instagramAccount.instagramId,
+              userId: userId,
+              message: msg3,
+            });
+          } catch (err3) {
+            console.warn("[DM Worker] Delayed message 3 error:", err3);
+          }
+        })()
+      );
+
+      return;
     } catch (err) {
       console.error("[DM Worker] Mithramandali claim code issuance failed:", err);
     }
   }
 
+  // Generic fallback for non-Mithramandali automations
+  let deliverMessage = automation.dmMessage;
   if (automation.trackedLinks.length === 0) {
     await sendDirectMessage({
       context: accessToken,
@@ -208,7 +268,6 @@ async function sendRevealDirectMessage({
       }),
     });
   } else {
-    // Try button template first; if Meta rejects it, fall back to inline links.
     const bodyText =
       renderMessageWithoutLink({
         message: deliverMessage,
@@ -217,11 +276,7 @@ async function sendRevealDirectMessage({
     const buttons = buildLinkButtons(
       automation.trackedLinks,
       automation.linkButtonLabel
-    ).map((b) => {
-      if (!unlockedPassId) return b;
-      const separator = b.url.includes("?") ? "&" : "?";
-      return { ...b, url: `${b.url}${separator}passId=${encodeURIComponent(unlockedPassId)}` };
-    });
+    );
 
     try {
       await sendDirectMessageWithLinkButton({
@@ -232,8 +287,6 @@ async function sendRevealDirectMessage({
         buttons: buttons,
       });
     } catch (buttonError) {
-      // A closed messaging window rejects the text retry too, so don't let it
-      // overwrite the original error with a misleading one.
       if (!isTemplateRejection(buttonError)) throw buttonError;
 
       console.log(
@@ -247,48 +300,15 @@ async function sendRevealDirectMessage({
           automation.trackedLinks,
           bodyText
         );
-        const finalFallback = unlockedPassId
-          ? fallbackMsg.replace(/(\/r\/[A-Za-z0-9_-]+)/g, `$1?passId=${encodeURIComponent(unlockedPassId)}`)
-          : fallbackMsg;
-
         await sendDirectMessage({
           context: accessToken,
           instagramAccountId: automation.instagramAccount.instagramId,
           userId: userId,
-          message: finalFallback,
+          message: fallbackMsg,
         });
       } catch {
         throw buttonError;
       }
-    }
-  }
-
-  // Message 2: Standalone Code for 1-tap mobile copying (always sent after Message 1)
-  if (claimResult?.formattedCode) {
-    try {
-      await sendDirectMessage({
-        context: accessToken,
-        instagramAccountId: automation.instagramAccount.instagramId,
-        userId: userId,
-        message: claimResult.formattedCode,
-      });
-    } catch (err2) {
-      console.warn("[DM Worker] Code follow-up message failed:", err2);
-    }
-  }
-
-  // Message 3: Thank you / Welcome to family appreciation message
-  if (automation.followUpEnabled && automation.followUpMessage?.trim()) {
-    try {
-      await new Promise((r) => setTimeout(r, 1200));
-      await sendDirectMessage({
-        context: accessToken,
-        instagramAccountId: automation.instagramAccount.instagramId,
-        userId: userId,
-        message: automation.followUpMessage.trim(),
-      });
-    } catch (err3) {
-      console.warn("[DM Worker] Direct thank-you follow-up failed:", err3);
     }
   }
 }
@@ -968,7 +988,8 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     if (follows === false) {
       if (fallback) return;
       const promptText = renderMessageWithoutLink({
-        message: "Dude you can't trick me😌 \nIf you want your ID do follow💫",
+        message:
+          "Dude you can't trick me 😌\nIf you want your ID do follow 💫\n\n(Or once you've followed, simply send '🎟️ Verify my Mandali Pass✨' — that always works!)",
         commenterName,
       });
       try {
@@ -980,7 +1001,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
               instagramAccountId: automation.instagramAccount.instagramId,
               userId: userId,
               text: promptText,
-              buttonTitle: "Yeaa i did ✦👊🏻",
+              buttonTitle: "Yeaa i did ✦👊",
               payload: `followcheck:${automation.id}`,
             }),
         });
@@ -1312,45 +1333,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     });
     const commenterName = priorLog?.commenterName ?? null;
 
-    // Repeat CLAIM Protection: If sender already claimed their pass, notify that it is active
-    const priorCompleted = await prisma.dmLog.findFirst({
-      where: {
-        automationId: automation.id,
-        commenterId: senderId,
-        status: "SENT",
-      },
-    });
 
-    if (priorCompleted && matchResult.matchedKeyword?.toUpperCase() === "CLAIM") {
-      try {
-        await sendDirectMessage({
-          context: accessToken,
-          instagramAccountId: automation.instagramAccount.instagramId,
-          userId: senderId,
-          message: `Namaste bro! 🙏 Mee Mithramandali Member Pass already verified and active! 🎟️ You're officially in the inner circle. Visit the vault: https://mithramandali.com`,
-        });
-        await prisma.dmLog.upsert({
-          where: {
-            automationId_commentId: {
-              automationId: automation.id,
-              commentId: dedupeId,
-            },
-          },
-          create: {
-            ...logBase,
-            status: "SENT",
-            errorMessage: "Repeat CLAIM: Delivered already-active confirmation",
-          },
-          update: {
-            status: "SENT",
-            errorMessage: "Repeat CLAIM: Delivered already-active confirmation",
-          },
-        });
-      } catch (err) {
-        console.warn("[DM Worker] Repeat claim message notification error:", err);
-      }
-      continue;
-    }
 
     // Follow gate: anyone not confirmed as a follower gets the prompt instead of
     // the link, with the same `followcheck:` button that re-verifies on tap.

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/client";
 import {
   parseCommentEvents,
   verifyWebhookSignature,
 } from "@/lib/meta/webhook";
 import { processInstagramWebhook } from "@/lib/queue/process-webhook";
-
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -61,10 +61,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  try {
-    await processInstagramWebhook({ payload: payload as Parameters<typeof parseCommentEvents>[0], provider: 'META' });
-    return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ success: false, error: 'Webhook processing failed' }, { status: 500 });
-  }
+  // Use Vercel background execution (Fluid Compute) to process webhook events
+  // while returning HTTP 200 to Meta instantly (<50ms).
+  waitUntil(
+    (async () => {
+      try {
+        await processInstagramWebhook({
+          payload: payload as Parameters<typeof parseCommentEvents>[0],
+          provider: "META",
+        });
+      } catch (err) {
+        console.error("[Webhook Handler] Async processing error:", err);
+      }
+    })()
+  );
+
+  return NextResponse.json({ success: true }, { status: 200 });
 }

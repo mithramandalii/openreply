@@ -92,6 +92,7 @@ export async function processInstagramWebhook({ payload: incoming, provider, wor
       } catch (err) {
         console.warn('[Webhook] Direct postback processing fallback to queue:', err);
         try {
+          const queue = getDMQueue();
           await queue.add(
             POSTBACK_JOB_NAME,
             {
@@ -134,6 +135,7 @@ export async function processInstagramWebhook({ payload: incoming, provider, wor
       } catch (err) {
         console.warn('[Webhook] Direct message processing fallback to queue:', err);
         try {
+          const queue = getDMQueue();
           await queue.add(
             MESSAGE_JOB_NAME,
             {

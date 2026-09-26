@@ -47,10 +47,10 @@ export interface IssueClaimCodeResult {
 }
 
 /**
- * Issues a single-use 24-hour Crockford-Base32 Claim Code for Mithramandali Conclave.
+ * Issues a single-use 24-hour Crockford-Base32 Claim Code for Mithramandali.
  * 
  * 1. Checks if the user already has an active pass in Firestore 'members' collection
- *    (matched by permanent IGSID or @handle). If so, returns their existing Pass ID.
+ *    (matched by permanent IGSID or @handle). If so, returns alreadyActive: true with their passId.
  * 2. Checks if the user already has an active, unexpired claim code in 'claim_codes'.
  *    If so, returns that existing code (idempotent / repeat trigger prevention).
  * 3. Otherwise, generates a fresh 10-char Crockford code and saves it to 'claim_codes/{cleanCode}'.
@@ -87,6 +87,15 @@ export async function issueClaimCode({
     }
   }
 
+  if (existingPassId) {
+    return {
+      ok: true,
+      alreadyActive: true,
+      passId: existingPassId,
+      name: existingName,
+    };
+  }
+
   // 2. Check if user already has an active, unexpired code in 'claim_codes'
   if (cleanIgsid) {
     const activeSnap = await db
@@ -103,8 +112,7 @@ export async function issueClaimCode({
       if (expMs > now) {
         return {
           ok: true,
-          alreadyActive: Boolean(existingPassId),
-          passId: existingPassId || undefined,
+          alreadyActive: false,
           name: existingName,
           code: data.code,
           formattedCode: data.formattedCode || formatCrockfordCode(data.code),
@@ -148,8 +156,7 @@ export async function issueClaimCode({
 
   return {
     ok: true,
-    alreadyActive: Boolean(existingPassId),
-    passId: existingPassId || undefined,
+    alreadyActive: false,
     name: existingName,
     code: cleanCode,
     formattedCode: formattedCode,
