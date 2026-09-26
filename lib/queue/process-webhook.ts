@@ -35,35 +35,41 @@ export async function processInstagramWebhook({ payload: incoming, provider, wor
     const commentEvents = parseCommentEvents(
       payload as Parameters<typeof parseCommentEvents>[0]
     );
-    const queue = getDMQueue();
 
-    for (const event of commentEvents) {
-      const account = accountMap.get(event.instagramAccountId);
-      if (!account) continue;
+    if (commentEvents.length > 0) {
+      try {
+        const queue = getDMQueue();
+        for (const event of commentEvents) {
+          const account = accountMap.get(event.instagramAccountId);
+          if (!account) continue;
 
-      await queue.add(
-        "process-comment",
-        {
-          instagramAccountId: event.instagramAccountId,
-          accountConnectionId: accountMap.get(event.instagramAccountId)?.id,
-          commentId: event.commentId,
-          commentText: event.commentText,
-          commenterId: event.commenterId,
-          commenterName: event.commenterName,
-          mediaId: event.mediaId,
-          originalMediaId: event.originalMediaId,
-          source: "WEBHOOK",
-        },
-        {
-          jobId: `comment_${event.instagramAccountId}_${event.commentId}`,
+          await queue.add(
+            "process-comment",
+            {
+              instagramAccountId: event.instagramAccountId,
+              accountConnectionId: accountMap.get(event.instagramAccountId)?.id,
+              commentId: event.commentId,
+              commentText: event.commentText,
+              commenterId: event.commenterId,
+              commenterName: event.commenterName,
+              mediaId: event.mediaId,
+              originalMediaId: event.originalMediaId,
+              source: "WEBHOOK",
+            },
+            {
+              jobId: `comment_${event.instagramAccountId}_${event.commentId}`,
+            }
+          );
+
+          if (account) {
+            await prisma.webhookEvent.update({
+              where: { id: webhookEvent.id },
+              data: { workspaceId: account.workspaceId },
+            });
+          }
         }
-      );
-
-      if (account) {
-        await prisma.webhookEvent.update({
-          where: { id: webhookEvent.id },
-          data: { workspaceId: account.workspaceId },
-        });
+      } catch (commentQueueErr) {
+        console.warn("[Webhook] Comment queue error (processing will continue for DMs):", commentQueueErr);
       }
     }
 
@@ -191,20 +197,25 @@ export async function processInstagramWebhook({ payload: incoming, provider, wor
         if (scheduledAutomationIds.has(automation.id)) continue;
         scheduledAutomationIds.add(automation.id);
 
-        await queue.add(
-          POSTBACK_JOB_NAME,
-          {
-            instagramAccountId: event.instagramAccountId,
-          accountConnectionId: accountMap.get(event.instagramAccountId)?.id,
-            userId: event.userId,
-            payload: `reveal:${automation.id}`,
-            fallback: true,
-          },
-          {
-            delay: OPENING_DM_READ_FALLBACK_DELAY_MS,
-            jobId: `read_fallback_${event.instagramAccountId}_${event.userId}_${automation.id}`,
-          }
-        );
+        try {
+          const queue = getDMQueue();
+          await queue.add(
+            POSTBACK_JOB_NAME,
+            {
+              instagramAccountId: event.instagramAccountId,
+              accountConnectionId: accountMap.get(event.instagramAccountId)?.id,
+              userId: event.userId,
+              payload: `reveal:${automation.id}`,
+              fallback: true,
+            },
+            {
+              delay: OPENING_DM_READ_FALLBACK_DELAY_MS,
+              jobId: `read_fallback_${event.instagramAccountId}_${event.userId}_${automation.id}`,
+            }
+          );
+        } catch (queueErr) {
+          console.warn("[Webhook] Failed to schedule read fallback to queue:", queueErr);
+        }
       }
     }
 

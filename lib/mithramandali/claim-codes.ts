@@ -66,29 +66,24 @@ export async function issueClaimCode({
   const now = Date.now();
 
   // 1. Check if user already has an active pass in 'members'
+  let existingPassId: string | null = null;
+  let existingName: string = name || "Mithrudu";
+
   if (cleanIgsid) {
     const snap = await db.collection("members").where("igsid", "==", cleanIgsid).limit(1).get();
     if (!snap.empty) {
       const doc = snap.docs[0];
-      return {
-        ok: true,
-        alreadyActive: true,
-        passId: doc.id,
-        name: doc.data().name || name || "Mithrudu",
-      };
+      existingPassId = doc.id;
+      if (doc.data().name) existingName = doc.data().name;
     }
   }
 
-  if (cleanInsta) {
+  if (!existingPassId && cleanInsta) {
     const snap = await db.collection("members").where("insta", "==", cleanInsta).limit(1).get();
     if (!snap.empty) {
       const doc = snap.docs[0];
-      return {
-        ok: true,
-        alreadyActive: true,
-        passId: doc.id,
-        name: doc.data().name || name || "Mithrudu",
-      };
+      existingPassId = doc.id;
+      if (doc.data().name) existingName = doc.data().name;
     }
   }
 
@@ -108,7 +103,9 @@ export async function issueClaimCode({
       if (expMs > now) {
         return {
           ok: true,
-          alreadyActive: false,
+          alreadyActive: Boolean(existingPassId),
+          passId: existingPassId || undefined,
+          name: existingName,
           code: data.code,
           formattedCode: data.formattedCode || formatCrockfordCode(data.code),
           expiresAtMs: expMs,
@@ -141,7 +138,7 @@ export async function issueClaimCode({
     formattedCode: formattedCode,
     igsid: cleanIgsid || null,
     insta: cleanInsta || null,
-    name: name || null,
+    name: existingName,
     status: "ISSUED",
     createdAt: FieldValue.serverTimestamp(),
     expiresAt: Timestamp.fromMillis(expiresAtMs),
@@ -151,7 +148,9 @@ export async function issueClaimCode({
 
   return {
     ok: true,
-    alreadyActive: false,
+    alreadyActive: Boolean(existingPassId),
+    passId: existingPassId || undefined,
+    name: existingName,
     code: cleanCode,
     formattedCode: formattedCode,
     expiresAtMs: expiresAtMs,

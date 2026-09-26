@@ -185,12 +185,11 @@ async function sendRevealDirectMessage({
         name: commenterName || "Mithrudu",
       });
 
-      if (claimResult.alreadyActive) {
-        // Smart Recovery for existing members
-        deliverMessage = `Welcome to Fam ! 🔥\nYour  Pass🎟️ is officially verified & active!\nGo checkout your id!\n\n🎟️ Mee Pass ID: ${claimResult.passId}`;
-      } else if (claimResult.formattedCode) {
-        // Exact match to user screenshot:
-        deliverMessage = `Welcome to Fam ! 🔥\nYour  Pass🎟️ is officially verified & active!\nGo checkout your id!`;
+      // Canonical Photo 3 Design: Namaste message with link button
+      deliverMessage = `Namaste 🎠! 🙏 Mithramandali Founding Pass kosam mee secret Verification Code kinda message lo undi 👇 (single-use • 24 hours)\nWebsite lo paste chesi mee pass weave cheskondi: https://mithramandali-2e7ed.web.app`;
+
+      if (claimResult.alreadyActive && claimResult.passId) {
+        deliverMessage += `\n\n🎟️ Mee Active Pass ID: ${claimResult.passId}`;
       }
     } catch (err) {
       console.error("[DM Worker] Mithramandali claim code issuance failed:", err);
@@ -265,7 +264,7 @@ async function sendRevealDirectMessage({
   }
 
   // Message 2: Standalone Code for 1-tap mobile copying (always sent after Message 1)
-  if (claimResult?.formattedCode && !claimResult.alreadyActive) {
+  if (claimResult?.formattedCode) {
     try {
       await sendDirectMessage({
         context: accessToken,
@@ -275,6 +274,21 @@ async function sendRevealDirectMessage({
       });
     } catch (err2) {
       console.warn("[DM Worker] Code follow-up message failed:", err2);
+    }
+  }
+
+  // Message 3: Thank you / Welcome to family appreciation message
+  if (automation.followUpEnabled && automation.followUpMessage?.trim()) {
+    try {
+      await new Promise((r) => setTimeout(r, 1200));
+      await sendDirectMessage({
+        context: accessToken,
+        instagramAccountId: automation.instagramAccount.instagramId,
+        userId: userId,
+        message: automation.followUpMessage.trim(),
+      });
+    } catch (err3) {
+      console.warn("[DM Worker] Direct thank-you follow-up failed:", err3);
     }
   }
 }
@@ -1031,20 +1045,24 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     if (automation.followUpEnabled && automation.followUpMessage?.trim()) {
       const delayMs =
         Math.max(0, automation.followUpDelayMinutes ?? 0) * 60_000;
-      await getDMQueue().add(
-        FOLLOWUP_JOB_NAME,
-        {
-          instagramAccountId: automation.instagramAccount.instagramId,
-          accountConnectionId: automation.instagramAccountId,
-          userId,
-          automationId: automation.id,
-          commenterName,
-        },
-        {
-          delay: delayMs,
-          jobId: `followup_${automation.id}_${userId}`,
-        },
-      );
+      try {
+        await getDMQueue().add(
+          FOLLOWUP_JOB_NAME,
+          {
+            instagramAccountId: automation.instagramAccount.instagramId,
+            accountConnectionId: automation.instagramAccountId,
+            userId,
+            automationId: automation.id,
+            commenterName,
+          },
+          {
+            delay: delayMs,
+            jobId: `followup_${automation.id}_${userId}`,
+          },
+        );
+      } catch (fuErr) {
+        console.warn("[DM Worker] Followup queue failed (already handled directly or skipped):", fuErr);
+      }
     }
     await prisma.dmLog.upsert({
       where: {
@@ -1404,20 +1422,24 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
         // here exactly as it does after a button tap. Not scheduled behind the
         // follow prompt — no link went out yet in that branch.
         if (automation.followUpEnabled && automation.followUpMessage?.trim()) {
-          await getDMQueue().add(
-            FOLLOWUP_JOB_NAME,
-            {
-              instagramAccountId: automation.instagramAccount.instagramId,
-              accountConnectionId: automation.instagramAccountId,
-              userId: senderId,
-              automationId: automation.id,
-              commenterName,
-            },
-            {
-              delay: Math.max(0, automation.followUpDelayMinutes ?? 0) * 60_000,
-              jobId: `followup_${automation.id}_${senderId}`,
-            }
-          );
+          try {
+            await getDMQueue().add(
+              FOLLOWUP_JOB_NAME,
+              {
+                instagramAccountId: automation.instagramAccount.instagramId,
+                accountConnectionId: automation.instagramAccountId,
+                userId: senderId,
+                automationId: automation.id,
+                commenterName,
+              },
+              {
+                delay: Math.max(0, automation.followUpDelayMinutes ?? 0) * 60_000,
+                jobId: `followup_${automation.id}_${senderId}`,
+              }
+            );
+          } catch (fuErr) {
+            console.warn("[DM Worker] Message followup queue failed (already handled directly or skipped):", fuErr);
+          }
         }
       }
 
