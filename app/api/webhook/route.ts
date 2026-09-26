@@ -1,5 +1,5 @@
+// app/api/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/client";
 import {
   parseCommentEvents,
@@ -7,7 +7,7 @@ import {
 } from "@/lib/meta/webhook";
 import { processInstagramWebhook } from "@/lib/queue/process-webhook";
 
-export const maxDuration = 60; // Allow background execution up to 60s for 30s delayed follow-up message
+export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -30,9 +30,6 @@ export async function POST(request: NextRequest) {
   const signature = request.headers.get("x-hub-signature-256");
 
   if (!verifyWebhookSignature(rawBody, signature)) {
-    // Record the attempt so a signature mismatch is visible rather than a
-    // silent 401. This is the common symptom of FACEBOOK_APP_SECRET being
-    // set to the wrong app's secret for the webhook's signing key.
     await prisma.operationalEvent
       .create({
         data: {
@@ -63,20 +60,28 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Use Vercel background execution (Fluid Compute) to process webhook events
-  // while returning HTTP 200 to Meta instantly (<50ms).
-  waitUntil(
-    (async () => {
-      try {
-        await processInstagramWebhook({
-          payload: payload as Parameters<typeof parseCommentEvents>[0],
-          provider: "META",
-        });
-      } catch (err) {
-        console.error("[Webhook Handler] Async processing error:", err);
-      }
-    })()
-  );
+  // CHANGED: await this directly instead of wrapping it in waitUntil().
+  // The 3 stuck "PENDING" webhookEvent rows with zero dmLog entries prove
+  // the background continuation was getting killed before it finished —
+  // meaning Message 1/2 were never even attempted. Awaiting here means
+  // Meta gets its 200 only once the actual send has happened, so it can't
+  // be silently dropped. This costs a bit of response latency (a couple of
+  // seconds), which Meta's webhook tolerates fine — it does not need <50ms.
+  //
+  // The 30-second delayed Message 3 is still handled separately via
+  // waitUntil inside dm-worker.ts's sendRevealDirectMessage — that one is
+  // fine to lose occasionally; Message 1/2 are not.
+  try {
+    await processInstagramWebhook({
+      payload: payload as Parameters<typeof parseCommentEvents>[0],
+      provider: "META",
+    });
+  } catch (err) {
+    console.error("[Webhook Handler] Processing error:", err);
+    // Still return 200 — Meta retries on non-200, and a retry would just
+    // re-attempt the same broken thing. The error is already logged to
+    // webhookEvent/operationalEvent for you to see, which is what matters.
+  }
 
   return NextResponse.json({ success: true }, { status: 200 });
 }
