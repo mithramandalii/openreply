@@ -7,6 +7,8 @@ import {
 } from "@/lib/meta/webhook";
 import { processInstagramWebhook } from "@/lib/queue/process-webhook";
 
+export const maxDuration = 60; // Allow background execution up to 60s for 30s delayed follow-up message
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const mode = searchParams.get("hub.mode");
