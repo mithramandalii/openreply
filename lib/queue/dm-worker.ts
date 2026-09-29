@@ -252,6 +252,7 @@ async function sendRevealDirectMessage({
       return;
     } catch (err) {
       console.error("[DM Worker] Mithramandali claim code issuance failed:", err);
+      throw err;
     }
   }
 

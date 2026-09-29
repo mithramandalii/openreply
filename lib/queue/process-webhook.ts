@@ -80,7 +80,7 @@ export async function processInstagramWebhook({ payload: incoming, provider, wor
 
     for (const event of postbackEvents) {
       const connId = accountMap.get(event.instagramAccountId)?.id;
-      // Direct inline execution for real-time responsiveness on serverless
+      // Direct inline execution for real-time responsiveness on serverless (0 Redis dependency)
       try {
         await processPostbackDirect({
           instagramAccountId: event.instagramAccountId,
@@ -89,28 +89,21 @@ export async function processInstagramWebhook({ payload: incoming, provider, wor
           payload: event.payload,
           mid: event.mid,
         });
-      } catch (err) {
-        console.warn('[Webhook] Direct postback processing fallback to queue:', err);
-        try {
-          const queue = getDMQueue();
-          await queue.add(
-            POSTBACK_JOB_NAME,
-            {
-              instagramAccountId: event.instagramAccountId,
-              accountConnectionId: connId,
+      } catch (err: any) {
+        console.error('[Webhook] Direct postback processing error:', err);
+        await prisma.operationalEvent.create({
+          data: {
+            workspaceId: accountMap.get(event.instagramAccountId)?.workspaceId ?? null,
+            source: "WORKER",
+            level: "ERROR",
+            message: `Direct postback processing failed for user ${event.userId}: ${err?.message || err}`,
+            payload: {
               userId: event.userId,
               payload: event.payload,
-              mid: event.mid,
+              error: String(err),
             },
-            {
-              jobId: `postback_${event.instagramAccountId}_${event.userId}_${(
-                event.mid ?? event.payload
-              ).replace(/:/g, "_")}`,
-            }
-          );
-        } catch(qErr) {
-          console.error('[Webhook] Queue fallback error:', qErr);
-        }
+          },
+        }).catch(() => {});
       }
     }
 
@@ -123,7 +116,7 @@ export async function processInstagramWebhook({ payload: incoming, provider, wor
       const account = accountMap.get(event.instagramAccountId);
       if (!account) continue;
 
-      // Direct inline execution for real-time responsiveness on serverless
+      // Direct inline execution for real-time responsiveness on serverless (0 Redis dependency)
       try {
         await processInboundDirectMessage({
           instagramAccountId: event.instagramAccountId,
@@ -132,28 +125,22 @@ export async function processInstagramWebhook({ payload: incoming, provider, wor
           messageText: event.messageText,
           senderId: event.senderId,
         });
-      } catch (err) {
-        console.warn('[Webhook] Direct message processing fallback to queue:', err);
-        try {
-          const queue = getDMQueue();
-          await queue.add(
-            MESSAGE_JOB_NAME,
-            {
-              instagramAccountId: event.instagramAccountId,
-              accountConnectionId: account.id,
+      } catch (err: any) {
+        console.error('[Webhook] Direct message processing error:', err);
+        await prisma.operationalEvent.create({
+          data: {
+            workspaceId: account.workspaceId,
+            source: "WORKER",
+            level: "ERROR",
+            message: `Direct message processing failed for sender ${event.senderId}: ${err?.message || err}`,
+            payload: {
               messageId: event.messageId,
               messageText: event.messageText,
               senderId: event.senderId,
+              error: String(err),
             },
-            {
-              jobId: `message_${event.instagramAccountId}_${Buffer.from(
-                event.messageId
-              ).toString("base64url")}`,
-            }
-          );
-        } catch(qErr) {
-          console.error('[Webhook] Queue fallback error:', qErr);
-        }
+          },
+        }).catch(() => {});
       }
 
       if (account) {

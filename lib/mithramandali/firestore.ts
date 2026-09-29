@@ -5,25 +5,56 @@ import fs from "node:fs";
 
 let dbInstance: Firestore | null = null;
 
+function parseFirebaseServiceAccount(str?: string): any {
+  if (!str) return null;
+  const trimmed = str.trim();
+
+  // 1. Try Base64 decode first (most reliable for multi-line private keys in env vars)
+  try {
+    const decoded = Buffer.from(trimmed, "base64").toString("utf8");
+    if (decoded.includes("private_key") || decoded.includes("project_id")) {
+      const obj = JSON.parse(decoded);
+      if (obj?.private_key) {
+        obj.private_key = obj.private_key.replace(/\\n/g, "\n");
+      }
+      return obj;
+    }
+  } catch {}
+
+  // 2. Direct JSON parse
+  try {
+    const obj = JSON.parse(trimmed);
+    if (obj?.private_key) {
+      obj.private_key = obj.private_key.replace(/\\n/g, "\n");
+    }
+    return obj;
+  } catch {}
+
+  // 3. Clean unescape quotes & newlines
+  try {
+    const fixed = trimmed.replace(/\\"/g, '"');
+    const obj = JSON.parse(fixed);
+    if (obj?.private_key) {
+      obj.private_key = obj.private_key.replace(/\\n/g, "\n");
+    }
+    return obj;
+  } catch {}
+
+  return null;
+}
+
 export function getMithramandaliFirestore(): Firestore {
   if (dbInstance) return dbInstance;
 
   if (getApps().length === 0) {
-    let serviceAccount: any = null;
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      try {
-        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-      } catch (e) {
-        console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT environment variable:", e);
-      }
-    }
+    let serviceAccount: any = parseFirebaseServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT);
 
     if (!serviceAccount) {
       const keyPath = path.resolve(process.cwd(), "mithramandali-service-account.json");
       if (fs.existsSync(keyPath)) {
         serviceAccount = JSON.parse(fs.readFileSync(keyPath, "utf8"));
       } else {
-        throw new Error(`Mithramandali service account key not found on disk or environment`);
+        throw new Error("Mithramandali service account key not found on disk or environment");
       }
     }
 
