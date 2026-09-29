@@ -205,11 +205,12 @@ async function sendRevealDirectMessage({
         return;
       }
 
-      // 2. New Member / Unclaimed Code: 3-Message Flow
-      // Message 1: Plain text welcome (no links, no buttons)
-      const msg1 =
-        automation.dmMessage ||
-        "Welcome to Fam !❤️‍🔥\nYour pass 🎟️ is officially verified & active !\nHere's your ID 🔑";
+      // 2. New Member / Unclaimed Code: 2-Message Atomic Delivery (0 background delay, <1s execution)
+      // Message 1: Warm welcome + community appreciation note
+      const baseWelcome = automation.dmMessage || "Welcome to Fam !❤️‍🔥\nYour pass 🎟️ is officially verified & active !";
+      const followUpNote = automation.followUpMessage?.trim() || "Btw... I'm very glad you're here🫂\nMore than a follower, we're family now.💗\nLowkey be part of what comes next...👀\nWelcome to MithraMandali✨";
+      const msg1 = `${baseWelcome}\n\n${followUpNote}\n\nHere's your 1-Tap Copyable ID 🔑👇`;
+
       await sendDirectMessage({
         context: accessToken,
         instagramAccountId: automation.instagramAccount.instagramId,
@@ -217,9 +218,9 @@ async function sendRevealDirectMessage({
         message: msg1,
       });
 
-      // Message 2: Standalone 1-Tap Copyable Code
+      // Message 2: Standalone 1-Tap Copyable Code (sent right after Message 1)
       if (claimResult.formattedCode) {
-        await new Promise((r) => setTimeout(r, 600));
+        await new Promise((r) => setTimeout(r, 400));
         await sendDirectMessage({
           context: accessToken,
           instagramAccountId: automation.instagramAccount.instagramId,
@@ -227,27 +228,6 @@ async function sendRevealDirectMessage({
           message: claimResult.formattedCode,
         });
       }
-
-      // Message 3: 2.5-Second Natural Reading Appreciation Follow-up (100% reliable on Vercel Hobby tier)
-      const msg3 =
-        automation.followUpMessage?.trim() ||
-        "Btw... I'm very glad you're here🫂\nMore then a follower, we're family now.💗\nLowkey be part of what comes next...👀\nWelcome to MithraMandali✨";
-
-      waitUntil(
-        (async () => {
-          try {
-            await new Promise((r) => setTimeout(r, 2_500));
-            await sendDirectMessage({
-              context: accessToken,
-              instagramAccountId: automation.instagramAccount.instagramId,
-              userId: userId,
-              message: msg3,
-            });
-          } catch (err3) {
-            console.warn("[DM Worker] Delayed message 3 error:", err3);
-          }
-        })()
-      );
 
       return;
     } catch (err) {
