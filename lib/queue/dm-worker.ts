@@ -228,7 +228,7 @@ async function sendRevealDirectMessage({
         });
       }
 
-      // Message 3: 30-Second Delayed Appreciation Follow-up via Vercel waitUntil
+      // Message 3: 2.5-Second Natural Reading Appreciation Follow-up (100% reliable on Vercel Hobby tier)
       const msg3 =
         automation.followUpMessage?.trim() ||
         "Btw... I'm very glad you're here🫂\nMore then a follower, we're family now.💗\nLowkey be part of what comes next...👀\nWelcome to MithraMandali✨";
@@ -236,7 +236,7 @@ async function sendRevealDirectMessage({
       waitUntil(
         (async () => {
           try {
-            await new Promise((r) => setTimeout(r, 30_000));
+            await new Promise((r) => setTimeout(r, 2_500));
             await sendDirectMessage({
               context: accessToken,
               instagramAccountId: automation.instagramAccount.instagramId,
